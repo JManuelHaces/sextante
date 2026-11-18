@@ -20,6 +20,7 @@ from .adapters import (
     register_adapter,
     resolve,
 )
+from .sae import SAE, SAEConfig, TrainConfig, train_sae
 from .utils import get_logger, seed_everything
 
 __version__ = "0.1.0.dev0"
@@ -32,6 +33,9 @@ __all__ = [
     "ActivationWriter",
     "ModelAdapter",
     "ModelMap",
+    "SAE",
+    "SAEConfig",
+    "TrainConfig",
     "__version__",
     "capture",
     "detect_adapter",
@@ -44,4 +48,5 @@ __all__ = [
     "resolve",
     "run_with_cache",
     "seed_everything",
+    "train_sae",
 ]
