@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.venv/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.DS_Store
+
+# activation stores, checkpoints and data live outside git
+out/
+data/
+*.safetensors
+wandb/
