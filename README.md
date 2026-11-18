@@ -7,7 +7,7 @@ internals (vision encoder, multimodal projector, language model) so you can see 
 represents and why it writes what it writes. It is built for medical VLMs (MedGemma,
 LLaVA-Med) but works with any Hugging Face VLM once you describe it with a small adapter.
 
-> Status: pre-alpha. `adapters`, `activations` and `sae` work today; `features`,
+> Status: pre-alpha. `adapters`, `activations`, `sae` and `features` work today;
 > `validation`, `intervene` and `transfer` are planned (see [docs/plan.md](docs/plan.md)).
 
 ## Install
@@ -110,6 +110,44 @@ spliced_loss(model, sae, "llm.12", batches)  # ce_clean, ce_sae, ce_zero, loss_r
   encoder does not subtract `b_dec`, use `load_weights(params, encoder_subtracts_b_dec=False)`.
 
 See [`examples/train_sae.py`](examples/train_sae.py).
+
+## Features
+
+```python
+from sextante.features import (
+    scan_features,
+    feature_table,
+    sample_activations,
+    patch_grid,
+    token_activations,
+    heatmap_overlay,
+    tokens_html,
+    interpret_feature,
+    claude_llm,
+)
+
+scan = scan_features(store, sae)  # one pass: per-sample max, firing stats
+values, samples = scan.top_samples(123, n=10)
+
+sa = sample_activations(store, sae, "llm.12", int(samples[0]), 123)
+heatmap_overlay(image, patch_grid(sa))  # activation over the image patches
+tokens_html(token_activations(sa, tokenizer))  # report tokens shaded by activation
+
+# Model property or corpus artifact? eta^2 / AUROC against sample metadata
+table = feature_table(scan, store.samples, nuisance=["hospital", "view"], targets=["effusion"])
+# each row: frequency, image_fraction, eta2:<key>, auroc:<key>, label in
+# {"dead", "corpus-artifact", "domain", "dense", ""}
+
+# LLM explanation + detection score (any Callable[[str], str]; Claude via the extra)
+interpret_feature(store, sae, scan, 123, claude_llm(effort="low"), tokenizer=tokenizer)
+```
+
+`pip install 'sextante[claude]'` adds the Claude helper. See
+[`examples/inspect_features.py`](examples/inspect_features.py), which writes a CSV of all
+features and an HTML page of top examples with heatmaps.
+
+The `label` column is a screen for what to inspect first, not a test: on a confounded
+dataset (a finding concentrated in one hospital) nuisance and target associations mix.
 
 ## Store format
 

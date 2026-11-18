@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from safetensors import safe_open
 from safetensors.torch import load_file, save_file
 from torch import Tensor
 
@@ -264,6 +265,64 @@ class ActivationStore:
         if not shards:
             raise ValueError(f"{point!r} has no rows")
         return ActivationRows.cat(shards)
+
+    # -- random access ----------------------------------------------------------------
+    def column(self, point: str, name: str) -> Tensor:
+        """One column (e.g. ``"sample_idx"``) for every row, without loading ``acts``."""
+        if name not in _COLUMNS:
+            raise KeyError(f"Unknown column {name!r}; expected one of {_COLUMNS}")
+        parts = []
+        for shard in self.shard_paths(point):
+            with safe_open(str(shard), framework="pt") as fh:
+                parts.append(fh.get_tensor(name))
+        return torch.cat(parts)
+
+    def rows(self, point: str, start: int, end: int) -> ActivationRows:
+        """Rows ``[start, end)`` of ``point`` (global row indices), read by slicing shards."""
+        n = self.n_rows(point)
+        start, end = max(0, start), min(end, n)
+        blocks, offset = [], 0
+        for shard, info in zip(
+            self.shard_paths(point), self.point_info(point)["shards"], strict=True
+        ):
+            lo, hi = offset, offset + info["n_rows"]
+            offset = hi
+            if hi <= start or lo >= end:
+                continue
+            a, b = max(start, lo) - lo, min(end, hi) - lo
+            with safe_open(str(shard), framework="pt") as fh:
+                blocks.append(ActivationRows(**{c: fh.get_slice(c)[a:b] for c in _COLUMNS}))
+        if not blocks:
+            d = self.d(point)
+            return ActivationRows(
+                acts=torch.empty(0, d),
+                sample_idx=torch.empty(0, dtype=torch.long),
+                position=torch.empty(0, dtype=torch.long),
+                is_image=torch.empty(0, dtype=torch.bool),
+                token_id=torch.empty(0, dtype=torch.long),
+            )
+        return ActivationRows.cat(blocks)
+
+    def sample_offsets(self, point: str) -> Tensor:
+        """``offsets[s]:offsets[s+1]`` are the rows of sample ``s`` (cached).
+
+        Extraction writes samples in order, so ``sample_idx`` is sorted within a point.
+        """
+        cache = self.__dict__.setdefault("_offsets", {})
+        if point not in cache:
+            sample_idx = self.column(point, "sample_idx")
+            if len(sample_idx) > 1 and (sample_idx[1:] < sample_idx[:-1]).any():
+                raise ValueError(f"{point!r}: rows are not sorted by sample")
+            targets = torch.arange(self.manifest["n_samples"] + 1)
+            cache[point] = torch.searchsorted(sample_idx, targets)
+        return cache[point]
+
+    def sample_rows(self, point: str, sample: int) -> ActivationRows:
+        """All rows of ``point`` that belong to sample ``sample``."""
+        offsets = self.sample_offsets(point)
+        if not 0 <= sample < len(offsets) - 1:
+            raise IndexError(f"sample {sample} out of range [0, {len(offsets) - 1})")
+        return self.rows(point, int(offsets[sample]), int(offsets[sample + 1]))
 
     def __repr__(self) -> str:
         pts = ", ".join(f"{p}[{self.n_rows(p)}x{self.d(p)}]" for p in self.points)
